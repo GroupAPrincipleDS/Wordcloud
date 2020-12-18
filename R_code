@@ -1,0 +1,135 @@
+library(shiny)
+library(wordcloud2)
+library(tm)
+library(colourpicker)
+library(RWeka)
+library(dplyr)
+library(shiny)
+
+
+
+#### Data import 
+
+library(DBI)
+
+con <- dbConnect(RPostgres::Postgres(), dbname='pds-project',
+                 host = 'pds-group-project.carynrwc1v04.ap-southeast-1.rds.amazonaws.com',
+                 port = 5432,
+                 user = 'pdsgroupproject',
+                 password = 'pdsadmin123')
+
+t <- dbReadTable(con,'data_with_details')
+
+
+
+####UI
+
+ui <- fluidPage(
+    titlePanel("Group A - Amazon Product Reviews"),
+    sidebarLayout(
+        sidebarPanel(
+            textInput(inputId = "txtSearch", label = "Search product:" ),
+            textInput(inputId = "ProductSearch",label = "Product Full Name: ",
+                      value = "LG LT700P Refrigerator Water Filter, Filters up to 300 Gallons of Water, Compatible with Select LG Multi-Door Refrigerators with SlimSpace Plus Ice System"),
+        ),
+        mainPanel(
+            plotOutput("good_review"),
+            plotOutput("bad_review")
+        )
+    )
+)
+
+
+####SERVER
+
+server <- function(input, output) {
+ 
+    
+    #### data source for good review
+           
+    datasource <- reactive({
+        
+        
+        good_t_w <- 
+            t %>% 
+            filter(title == input$ProductSearch) %>%
+            filter(overall>=3) %>%
+            select(summary)
+        mycorpus <- Corpus(VectorSource(good_t_w $summary))
+        mycorpus <-tm_map(mycorpus,content_transformer(tolower))
+        mycorpus <- tm_map(mycorpus, removeNumbers)
+        mycorpus <- tm_map(mycorpus, removeWords,stopwords("english"))
+        mycorpus <- tm_map(mycorpus,removePunctuation)
+        mycorpus <- tm_map(mycorpus,stripWhitespace)
+        mycorpus <- tm_map(mycorpus, removeWords, c("one","two","three","four","five", "star","stars")) 
+        
+
+        
+        token_delim <- " \\t\\r\\n.!?,;\"()"
+        bitoken <- NGramTokenizer(mycorpus, Weka_control(min=2,max=2, delimiters = token_delim))
+        two_word <- data.frame(table(bitoken))
+        sort_two <- two_word[order(two_word$Freq,decreasing=TRUE),]
+        
+        return(sort_two)
+    })
+    
+    
+    #### data source for bad review
+    
+    
+    datasource_v2 <- reactive({
+        
+        
+        bad_t_w <- 
+            t %>% 
+            filter(title == input$ProductSearch) %>%
+            filter(overall<3) %>%
+            select(summary)
+        mycorpus <- Corpus(VectorSource(bad_t_w $summary))
+        mycorpus <-tm_map(mycorpus,content_transformer(tolower))
+        mycorpus <- tm_map(mycorpus, removeNumbers)
+        mycorpus <- tm_map(mycorpus, removeWords,stopwords("english"))
+        mycorpus <- tm_map(mycorpus,removePunctuation)
+        mycorpus <- tm_map(mycorpus,stripWhitespace)
+        mycorpus <- tm_map(mycorpus, removeWords, c("one","two","three","four","five", "star","stars")) 
+        
+        
+        
+        token_delim <- " \\t\\r\\n.!?,;\"()"
+        bitoken <- NGramTokenizer(mycorpus, Weka_control(min=2,max=2, delimiters = token_delim))
+        two_word <- data.frame(table(bitoken))
+        sort_two <- two_word[order(two_word$Freq,decreasing=TRUE),]
+        
+        return(sort_two)
+    })
+    
+    
+    
+    #### wordcloud for good review
+    
+    output$good_review <- renderPlot({
+        x <- datasource()$bitoken
+        y <- datasource()$Freq
+        minfreq_bigram <- 2
+        
+        wordcloud(x,y,random.order=FALSE,scale = c(4,0.5),min.freq = minfreq_bigram,colors = brewer.pal(8,"Dark2"),max.words=50)
+        
+    
+    })
+    
+    #### wordcloud for bad review
+    
+    output$bad_review <- renderPlot({
+        x <- datasource_v2()$bitoken
+        y <- datasource_v2()$Freq
+        minfreq_bigram <- 2
+        
+        wordcloud(x,y,random.order=FALSE,scale = c(4,0.5),min.freq = minfreq_bigram,colors = brewer.pal(8,"Dark2"),max.words=50)
+        
+        
+    })
+    
+}
+
+# Run the application 
+shinyApp(ui = ui, server = server)
